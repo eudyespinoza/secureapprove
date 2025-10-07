@@ -1,0 +1,203 @@
+# Simplified Production Docker Compose for SecureApprove
+# This version uses pre-built images and focuses on infrastructure
+
+version: '3.9'
+
+services:
+  # Traefik Reverse Proxy & Load Balancer
+  traefik:
+    image: traefik:v3.0
+    container_name: secureapprove-traefik
+    restart: unless-stopped
+    command:
+      - --api.dashboard=true
+      - --api.insecure=true
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --log.level=INFO
+      - --accesslog=true
+      - --global.checknewversion=false
+      - --global.sendanonymoususage=false
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"  # Traefik dashboard
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./logs/traefik:/logs
+    networks:
+      - traefik
+    environment:
+      - TRAEFIK_API_INSECURE=true
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # MongoDB Replica Set (Primary)
+  mongodb-primary:
+    image: mongo:7
+    container_name: secureapprove-mongodb-primary
+    restart: unless-stopped
+    command: mongod --replSet rs0 --bind_ip_all
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data_primary:/data/db
+      - mongodb_config:/data/configdb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGODB_ROOT_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_ROOT_PASSWORD:-password}
+      MONGO_INITDB_DATABASE: ${MONGODB_DB_NAME:-secureapprove}
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  # Redis Master
+  redis-master:
+    image: redis:7-alpine
+    container_name: secureapprove-redis-master
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD:-password}
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --rdbcompression yes
+      --rdbchecksum yes
+      --maxmemory 1gb
+      --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data_master:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Simple API Test Service (Node.js)
+  api-test:
+    image: node:18-alpine
+    container_name: secureapprove-api-test
+    restart: unless-stopped
+    working_dir: /app
+    command: >
+      sh -c "
+      echo 'const express = require(\"express\");
+      const app = express();
+      app.use(express.json());
+      app.get(\"/health\", (req, res) => res.json({status:\"healthy\",timestamp:new Date()}));
+      app.get(\"/\", (req, res) => res.json({message:\"SecureApprove API Test\",version:\"1.0.0\"}));
+      app.listen(3001, \"0.0.0.0\", () => console.log(\"API Test running on port 3001\"));' > server.js &&
+      npm init -y &&
+      npm install express &&
+      node server.js
+      "
+    ports:
+      - "3001:3001"
+    networks:
+      - backend
+      - traefik
+    environment:
+      - NODE_ENV=production
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api.rule=Host(`api.${DOMAIN:-localhost}`)"
+      - "traefik.http.services.api.loadbalancer.server.port=3001"
+      - "traefik.http.services.api.loadbalancer.healthcheck.path=/health"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # Simple Web Test Service
+  web-test:
+    image: nginx:alpine
+    container_name: secureapprove-web-test
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    volumes:
+      - ./web-content:/usr/share/nginx/html:ro
+    networks:
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.web.rule=Host(`${DOMAIN:-localhost}`)"
+      - "traefik.http.services.web.loadbalancer.server.port=80"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Prometheus Monitoring (Optional)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: secureapprove-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - prometheus_data:/prometheus
+    networks:
+      - monitoring
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.prometheus.rule=Host(`prometheus.${DOMAIN:-localhost}`)"
+
+  # Grafana Dashboard (Optional)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: secureapprove-grafana
+    restart: unless-stopped
+    ports:
+      - "3002:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - monitoring
+    depends_on:
+      - prometheus
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.${DOMAIN:-localhost}`)"
+
+networks:
+  traefik:
+    external: false
+  backend:
+    internal: false
+  monitoring:
+    internal: false
+
+volumes:
+  mongodb_data_primary:
+  mongodb_config:
+  redis_data_master:
+  prometheus_data:
+  grafana_data:
