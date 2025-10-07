@@ -1,0 +1,66 @@
+{
+  "name": "secure-approve",
+  "private": true,
+  "version": "1.0.0",
+  "description": "WebAuthn-based approval system with monorepo architecture",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev",
+    "lint": "turbo lint",
+    "format": "prettier --write \"**/*.{ts,tsx,md}\"",
+    "type-check": "turbo type-check",
+    "test": "turbo test",
+    "test:e2e": "playwright test",
+    "test:e2e:staging": "BASE_URL=https://staging.secureapprove.com playwright test",
+    "test:smoke:production": "BASE_URL=https://secureapprove.com playwright test tests/smoke",
+    "security:audit": "npm audit --audit-level high",
+    "security:scan": "semgrep --config=auto .",
+    "docker:build": "docker-compose -f infra/docker-compose.yml build",
+    "docker:up": "docker-compose -f infra/docker-compose.yml up -d",
+    "docker:down": "docker-compose -f infra/docker-compose.yml down",
+    "docker:prod": "docker-compose -f infra/docker-compose.prod.yml up -d",
+    "backup:create": "node scripts/backup.js",
+    "backup:restore": "node scripts/restore.js",
+    "deploy:staging": "gh workflow run staging.yml",
+    "deploy:production": "gh workflow run production.yml"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.40.0",
+    "@types/node": "^20.8.0",
+    "@typescript-eslint/eslint-plugin": "^6.9.0",
+    "@typescript-eslint/parser": "^6.9.0",
+    "eslint": "^8.52.0",
+    "eslint-config-prettier": "^9.0.0",
+    "prettier": "^3.0.0",
+    "turbo": "^1.10.0",
+    "typescript": "^5.2.0"
+  },
+  "packageManager": "npm@9.8.0",
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/secure-approve.git"
+  },
+  "keywords": [
+    "webauthn",
+    "approval",
+    "security",
+    "biometric",
+    "monorepo"
+  ],
+  "author": "SecureApprove Team",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "mongodb": "^6.20.0",
+    "redis": "^5.8.3"
+  }
+}

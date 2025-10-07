@@ -1,0 +1,351 @@
+name: 'Production Deployment'
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '18'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  test:
+    name: 'Run Tests'
+    runs-on: ubuntu-latest
+    
+    services:
+      mongodb:
+        image: mongo:7
+        env:
+          MONGO_INITDB_ROOT_USERNAME: admin
+          MONGO_INITDB_ROOT_PASSWORD: password
+        ports:
+          - 27017:27017
+      
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: 'Checkout Code'
+        uses: actions/checkout@v4
+
+      - name: 'Setup Node.js'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 'Install Dependencies'
+        run: npm ci
+
+      - name: 'Run Linting'
+        run: npm run lint
+
+      - name: 'Run Type Check'
+        run: npm run type-check
+
+      - name: 'Run Unit Tests'
+        run: npm run test
+        env:
+          MONGODB_URI: mongodb://admin:password@localhost:27017/test?authSource=admin
+          REDIS_URL: redis://localhost:6379
+
+      - name: 'Run E2E Tests'
+        run: npm run test:e2e
+        env:
+          MONGODB_URI: mongodb://admin:password@localhost:27017/test?authSource=admin
+          REDIS_URL: redis://localhost:6379
+
+  security:
+    name: 'Security Scan'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 'Checkout Code'
+        uses: actions/checkout@v4
+
+      - name: 'Setup Node.js'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 'Install Dependencies'
+        run: npm ci
+
+      - name: 'Run Security Audit'
+        run: npm audit --audit-level high
+
+      - name: 'Run CodeQL Analysis'
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
+
+      - name: 'Perform CodeQL Analysis'
+        uses: github/codeql-action/analyze@v3
+
+      - name: 'Run Semgrep Security Scan'
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/security-audit
+            p/secrets
+            p/owasp-top-ten
+
+  build:
+    name: 'Build and Push Images'
+    runs-on: ubuntu-latest
+    needs: [test, security]
+    
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      matrix:
+        app: [api, web, mobile]
+
+    steps:
+      - name: 'Checkout Code'
+        uses: actions/checkout@v4
+
+      - name: 'Log in to Container Registry'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 'Extract Metadata'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.app }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: 'Set up Docker Buildx'
+        uses: docker/setup-buildx-action@v3
+
+      - name: 'Build and Push Image'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./apps/${{ matrix.app }}/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-staging:
+    name: 'Deploy to Staging'
+    runs-on: ubuntu-latest
+    needs: build
+    environment: staging
+    
+    steps:
+      - name: 'Checkout Code'
+        uses: actions/checkout@v4
+
+      - name: 'Configure AWS Credentials'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: 'Deploy to ECS Staging'
+        run: |
+          # Update ECS service with new images
+          aws ecs update-service \
+            --cluster secureapprove-staging \
+            --service secureapprove-api-staging \
+            --force-new-deployment
+
+          aws ecs update-service \
+            --cluster secureapprove-staging \
+            --service secureapprove-web-staging \
+            --force-new-deployment
+
+      - name: 'Wait for Deployment'
+        run: |
+          aws ecs wait services-stable \
+            --cluster secureapprove-staging \
+            --services secureapprove-api-staging secureapprove-web-staging
+
+      - name: 'Run Health Checks'
+        run: |
+          # Wait for services to be healthy
+          sleep 30
+          
+          # Check API health
+          curl -f https://api-staging.secureapprove.com/health || exit 1
+          
+          # Check Web health  
+          curl -f https://staging.secureapprove.com/api/health || exit 1
+
+  e2e-staging:
+    name: 'E2E Tests on Staging'
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    
+    steps:
+      - name: 'Checkout Code'
+        uses: actions/checkout@v4
+
+      - name: 'Setup Node.js'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 'Install Dependencies'
+        run: npm ci
+
+      - name: 'Install Playwright'
+        run: npx playwright install --with-deps
+
+      - name: 'Run E2E Tests on Staging'
+        run: npm run test:e2e:staging
+        env:
+          BASE_URL: https://staging.secureapprove.com
+          API_URL: https://api-staging.secureapprove.com
+
+      - name: 'Upload Test Results'
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-test-results
+          path: test-results/
+
+  deploy-production:
+    name: 'Deploy to Production'
+    runs-on: ubuntu-latest
+    needs: e2e-staging
+    environment: production
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: 'Checkout Code'
+        uses: actions/checkout@v4
+
+      - name: 'Configure AWS Credentials'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: 'Create Database Backup'
+        run: |
+          # Trigger backup before deployment
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.BACKUP_API_KEY }}" \
+            https://api.secureapprove.com/admin/backup
+
+      - name: 'Deploy to ECS Production'
+        run: |
+          # Blue-green deployment strategy
+          aws ecs update-service \
+            --cluster secureapprove-production \
+            --service secureapprove-api-production \
+            --force-new-deployment
+
+          aws ecs update-service \
+            --cluster secureapprove-production \
+            --service secureapprove-web-production \
+            --force-new-deployment
+
+      - name: 'Wait for Deployment'
+        run: |
+          aws ecs wait services-stable \
+            --cluster secureapprove-production \
+            --services secureapprove-api-production secureapprove-web-production
+
+      - name: 'Run Production Health Checks'
+        run: |
+          # Wait for services to be healthy
+          sleep 60
+          
+          # Comprehensive health checks
+          curl -f https://api.secureapprove.com/health || exit 1
+          curl -f https://secureapprove.com/api/health || exit 1
+          
+          # Check WebAuthn endpoints
+          curl -f https://api.secureapprove.com/api/webauthn/options || exit 1
+
+      - name: 'Run Smoke Tests'
+        run: |
+          npm run test:smoke:production
+        env:
+          BASE_URL: https://secureapprove.com
+          API_URL: https://api.secureapprove.com
+
+      - name: 'Notify Deployment Success'
+        uses: 8398a7/action-slack@v3
+        with:
+          status: success
+          channel: '#deployments'
+          text: '🚀 SecureApprove successfully deployed to production!'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+
+  rollback:
+    name: 'Rollback on Failure'
+    runs-on: ubuntu-latest
+    needs: deploy-production
+    if: failure()
+    
+    steps:
+      - name: 'Configure AWS Credentials'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: 'Rollback ECS Services'
+        run: |
+          # Get previous task definition
+          PREVIOUS_API_TASK=$(aws ecs list-task-definitions \
+            --family-prefix secureapprove-api-production \
+            --status ACTIVE \
+            --sort DESC \
+            --max-items 2 \
+            --query 'taskDefinitionArns[1]' \
+            --output text)
+
+          PREVIOUS_WEB_TASK=$(aws ecs list-task-definitions \
+            --family-prefix secureapprove-web-production \
+            --status ACTIVE \
+            --sort DESC \
+            --max-items 2 \
+            --query 'taskDefinitionArns[1]' \
+            --output text)
+
+          # Rollback services
+          aws ecs update-service \
+            --cluster secureapprove-production \
+            --service secureapprove-api-production \
+            --task-definition $PREVIOUS_API_TASK
+
+          aws ecs update-service \
+            --cluster secureapprove-production \
+            --service secureapprove-web-production \
+            --task-definition $PREVIOUS_WEB_TASK
+
+      - name: 'Notify Rollback'
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          channel: '#deployments'
+          text: '⚠️ SecureApprove deployment failed and rolled back!'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
