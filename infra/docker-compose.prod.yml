@@ -59,7 +59,7 @@ services:
     restart: unless-stopped
     command: mongod --replSet rs0 --bind_ip_all --auth --keyFile /etc/mongodb-keyfile
     ports:
-      - "27018:27017"  # Changed from 27017 to 27018 to avoid conflicts
+      - "27019:27017"  # Changed to 27019 to avoid conflicts
     volumes:
       - mongodb_data_primary:/data/db
       - mongodb_config:/data/configdb
@@ -85,7 +85,7 @@ services:
     restart: unless-stopped
     command: mongod --replSet rs0 --bind_ip_all --auth --keyFile /etc/mongodb-keyfile
     ports:
-      - "27018:27017"
+      - "27020:27017"  # Secondary MongoDB instance on different port
     volumes:
       - mongodb_data_secondary1:/data/db
       - ./mongodb/keyfile:/etc/mongodb-keyfile:ro
@@ -110,7 +110,7 @@ services:
     restart: unless-stopped
     command: mongod --replSet rs0 --bind_ip_all --auth --keyFile /etc/mongodb-keyfile
     ports:
-      - "27019:27017"
+      - "27021:27017"  # Secondary2 MongoDB instance on different port
     volumes:
       - mongodb_data_secondary2:/data/db
       - ./mongodb/keyfile:/etc/mongodb-keyfile:ro

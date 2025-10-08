@@ -5,7 +5,7 @@
 - **Dashboard Traefik**: `http://tu-servidor:8080`
 - **Prometheus**: `http://tu-servidor:9090`
 - **Grafana**: `http://tu-servidor:3002` (admin/admin123)
-- **MongoDB**: `tu-servidor:27018` (puerto cambiado para evitar conflictos)ara Desplegar en Tu Servidor
+- **MongoDB**: `tu-servidor:27019` (puerto cambiado para evitar conflictos)ara Desplegar en Tu Servidor
 
 ### 1. En tu servidor VPS (donde tienes el error):
 

@@ -44,7 +44,7 @@ services:
     restart: unless-stopped
     command: mongod --replSet rs0 --bind_ip_all
     ports:
-      - "27018:27017"  # Changed from 27017 to 27018 to avoid conflicts
+      - "27019:27017"  # Changed to 27019 to avoid conflicts
     volumes:
       - mongodb_data_primary:/data/db
       - mongodb_config:/data/configdb

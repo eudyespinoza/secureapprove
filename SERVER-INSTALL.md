@@ -81,7 +81,7 @@ Después de la instalación, accede a:
 - **Dashboard Traefik**: `http://TU-IP:8080`
 - **Prometheus**: `http://TU-IP:9090`
 - **Grafana**: `http://TU-IP:3002` (admin/admin123)
-- **MongoDB**: `TU-IP:27018` (puerto cambiado para evitar conflictos)
+- **MongoDB**: `TU-IP:27019` (puerto cambiado para evitar conflictos)
 
 ## ⚙️ Configuración Post-Instalación
 
