@@ -122,14 +122,14 @@ print_step "10. Configurando firewall básico..."
 if command -v ufw &> /dev/null; then
     ufw --force enable
     ufw allow ssh
-    ufw allow 80
-    ufw allow 443
+    ufw allow 8081  # Alternative HTTP port (changed from 80)
+    ufw allow 8443  # Alternative HTTPS port (changed from 443)
     ufw allow 3000
     ufw allow 3001
     ufw allow 3002
     ufw allow 8080
     ufw allow 9090
-    print_status "Firewall configurado"
+    print_status "Firewall configurado (puertos alternativos para evitar conflicto con Nginx)"
 else
     print_warning "UFW no disponible, configurar firewall manualmente"
 fi
@@ -150,6 +150,7 @@ echo ""
 echo "📁 Ubicación: $INSTALL_DIR/$PROJECT_NAME"
 echo "🌐 Servicios disponibles:"
 echo "   • Web Application: http://$(hostname -I | awk '{print $1}'):3000"
+echo "   • Web via Traefik: http://$(hostname -I | awk '{print $1}'):8081"
 echo "   • API Test: http://$(hostname -I | awk '{print $1}'):3001"
 echo "   • Traefik Dashboard: http://$(hostname -I | awk '{print $1}'):8080"
 echo "   • Prometheus: http://$(hostname -I | awk '{print $1}'):9090"

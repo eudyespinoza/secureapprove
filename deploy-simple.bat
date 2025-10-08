@@ -122,11 +122,12 @@ echo 🎉 SecureApprove desplegado exitosamente^!
 echo.
 echo 📊 Servicios Disponibles:
 echo    • Web Application: http://localhost:3000
+echo    • Web via Traefik: http://localhost:8081 ^(puerto alternativo^)
 echo    • API Test: http://localhost:3001
 echo    • Traefik Dashboard: http://localhost:8080
 echo    • Prometheus: http://localhost:9090
 echo    • Grafana: http://localhost:3002 ^(admin/admin123^)
-echo    • MongoDB: localhost:27017
+echo    • MongoDB: localhost:27019
 echo    • Redis: localhost:6379
 echo.
 echo 🔍 Comandos utiles:

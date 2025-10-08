@@ -27,8 +27,8 @@ services:
       - --metrics.prometheus.addentrypointslabels=true
       - --metrics.prometheus.addserviceslabels=true
     ports:
-      - "80:80"
-      - "443:443"
+      - "8081:80"    # Changed from 80 to 8081 to avoid Nginx conflict
+      - "8443:443"   # Changed from 443 to 8443 to avoid Nginx conflict
       - "8080:8080"  # Traefik dashboard
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro

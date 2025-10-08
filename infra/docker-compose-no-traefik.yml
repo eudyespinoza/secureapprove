@@ -1,50 +1,17 @@
-# Simplified Production Docker Compose for SecureApprove
-# This version uses pre-built images and focuses on infrastructure
+# SecureApprove without Traefik - Connect to External Nginx
+# This version removes Traefik and connects to existing Nginx network
 
 version: '3.9'
 
 services:
-  # Traefik Reverse Proxy & Load Balancer
-  traefik:
-    image: traefik:v3.0
-    container_name: secureapprove-traefik
-    restart: unless-stopped
-    command:
-      - --api.dashboard=true
-      - --api.insecure=true
-      - --providers.docker=true
-      - --providers.docker.exposedbydefault=false
-      - --entrypoints.web.address=:80
-      - --entrypoints.websecure.address=:443
-      - --log.level=INFO
-      - --accesslog=true
-      - --global.checknewversion=false
-      - --global.sendanonymoususage=false
-    ports:
-      - "8081:80"    # Changed from 80 to 8081 to avoid Nginx conflict
-      - "8443:443"   # Changed from 443 to 8443 to avoid Nginx conflict  
-      - "8080:8080"  # Traefik dashboard
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./logs/traefik:/logs
-    networks:
-      - traefik
-    environment:
-      - TRAEFIK_API_INSECURE=true
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/ping"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-
-  # MongoDB Replica Set (Primary)
+  # MongoDB Primary
   mongodb-primary:
     image: mongo:7
     container_name: secureapprove-mongodb-primary
     restart: unless-stopped
     command: mongod --replSet rs0 --bind_ip_all
     ports:
-      - "27019:27017"  # Changed to 27019 to avoid conflicts
+      - "27019:27017"  # External access
     volumes:
       - mongodb_data_primary:/data/db
       - mongodb_config:/data/configdb
@@ -53,7 +20,8 @@ services:
       MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_ROOT_PASSWORD:-password}
       MONGO_INITDB_DATABASE: ${MONGODB_DB_NAME:-secureapprove}
     networks:
-      - backend
+      - secureapprove-backend
+      - nginx-network  # Connect to existing nginx network
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 30s
@@ -81,14 +49,15 @@ services:
     volumes:
       - redis_data_master:/data
     networks:
-      - backend
+      - secureapprove-backend
+      - nginx-network  # Connect to existing nginx network
     healthcheck:
       test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
       interval: 30s
       timeout: 5s
       retries: 3
 
-  # Simple API Test Service (Node.js)
+  # API Test Service
   api-test:
     image: node:18-alpine
     container_name: secureapprove-api-test
@@ -107,17 +76,12 @@ services:
       node server.js
       "
     ports:
-      - "3001:3001"
+      - "3001:3001"  # Direct port access for nginx proxy
     networks:
-      - backend
-      - traefik
+      - secureapprove-backend
+      - nginx-network  # Connect to existing nginx network
     environment:
       - NODE_ENV=production
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.api.rule=Host(`api.${DOMAIN:-localhost}`)"
-      - "traefik.http.services.api.loadbalancer.server.port=3001"
-      - "traefik.http.services.api.loadbalancer.healthcheck.path=/health"
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3001/health"]
       interval: 30s
@@ -125,28 +89,25 @@ services:
       retries: 3
       start_period: 20s
 
-  # Simple Web Test Service
+  # Web Test Service
   web-test:
     image: nginx:alpine
     container_name: secureapprove-web-test
     restart: unless-stopped
     ports:
-      - "3000:80"
+      - "3000:80"  # Direct port access for nginx proxy
     volumes:
       - ./web-content:/usr/share/nginx/html:ro
     networks:
-      - traefik
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.web.rule=Host(`${DOMAIN:-localhost}`)"
-      - "traefik.http.services.web.loadbalancer.server.port=80"
+      - secureapprove-backend
+      - nginx-network  # Connect to existing nginx network
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
       interval: 30s
       timeout: 5s
       retries: 3
 
-  # Prometheus Monitoring (Optional)
+  # Prometheus Monitoring
   prometheus:
     image: prom/prometheus:latest
     container_name: secureapprove-prometheus
@@ -156,7 +117,8 @@ services:
     volumes:
       - prometheus_data:/prometheus
     networks:
-      - monitoring
+      - secureapprove-monitoring
+      - nginx-network  # Connect to existing nginx network
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -164,11 +126,8 @@ services:
       - '--web.console.templates=/etc/prometheus/consoles'
       - '--storage.tsdb.retention.time=15d'
       - '--web.enable-lifecycle'
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.prometheus.rule=Host(`prometheus.${DOMAIN:-localhost}`)"
 
-  # Grafana Dashboard (Optional)
+  # Grafana Dashboard
   grafana:
     image: grafana/grafana:latest
     container_name: secureapprove-grafana
@@ -180,20 +139,21 @@ services:
     volumes:
       - grafana_data:/var/lib/grafana
     networks:
-      - monitoring
+      - secureapprove-monitoring
+      - nginx-network  # Connect to existing nginx network
     depends_on:
       - prometheus
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.grafana.rule=Host(`grafana.${DOMAIN:-localhost}`)"
 
 networks:
-  traefik:
-    external: false
-  backend:
-    internal: false
-  monitoring:
-    internal: false
+  secureapprove-backend:
+    name: secureapprove-backend
+    driver: bridge
+  secureapprove-monitoring:
+    name: secureapprove-monitoring  
+    driver: bridge
+  nginx-network:
+    name: nginx-network
+    external: true  # Connect to existing nginx network
 
 volumes:
   mongodb_data_primary:

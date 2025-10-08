@@ -1,6 +1,7 @@
 # 🚀 SecureApprove - Guía de Despliegue Rápido
 
 ## Pa- **Web Principal**: `http://tu-servidor:3000`
+- **Web via Traefik**: `http://tu-servidor:8081` (puerto alternativo para evitar conflicto con Nginx)
 - **API de Prueba**: `http://tu-servidor:3001`
 - **Dashboard Traefik**: `http://tu-servidor:8080`
 - **Prometheus**: `http://tu-servidor:9090`

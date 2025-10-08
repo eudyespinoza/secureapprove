@@ -77,6 +77,7 @@ cd /opt/secureapprove/secureapprove && cp .env.server .env && chmod +x deploy-si
 Después de la instalación, accede a:
 
 - **Web Principal**: `http://TU-IP:3000`
+- **Web via Traefik**: `http://TU-IP:8081` (puerto alternativo para evitar conflicto con Nginx)
 - **API de Prueba**: `http://TU-IP:3001/health`
 - **Dashboard Traefik**: `http://TU-IP:8080`
 - **Prometheus**: `http://TU-IP:9090`
