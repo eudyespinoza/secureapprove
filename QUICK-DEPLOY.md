@@ -1,6 +1,11 @@
 # 🚀 SecureApprove - Guía de Despliegue Rápido
 
-## Pasos para Desplegar en Tu Servidor
+## Pa- **Web Principal**: `http://tu-servidor:3000`
+- **API de Prueba**: `http://tu-servidor:3001`
+- **Dashboard Traefik**: `http://tu-servidor:8080`
+- **Prometheus**: `http://tu-servidor:9090`
+- **Grafana**: `http://tu-servidor:3002` (admin/admin123)
+- **MongoDB**: `tu-servidor:27018` (puerto cambiado para evitar conflictos)ara Desplegar en Tu Servidor
 
 ### 1. En tu servidor VPS (donde tienes el error):
 
